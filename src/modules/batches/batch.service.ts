@@ -16,6 +16,7 @@ export const createBatchJob = async(files: Express.Multer.File[], outputFormat: 
       name: 'convert-image',
       queueName: 'image-processing',
       data: {
+        batchId,
         inputPath: file.path,
         outputFormat: outputFormat
       }

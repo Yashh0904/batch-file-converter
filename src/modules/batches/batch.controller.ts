@@ -1,7 +1,10 @@
-import type { NextFunction, Request, Response } from "express";
+import type { Request, Response } from "express";
 import { ApiError } from "../../middleware/error.middleware.js";
 import { createBatchJob } from "./batch.service.js";
-import { batchQueue } from "../../queue.js";
+import { batchQueue } from "../../utils/queue.js";
+import path from "node:path";
+import { existsSync } from "node:fs";
+import { ZipArchive } from "archiver";
 
 export const createBatch = async (req: Request, res: Response) => {
   const files = req.files as Express.Multer.File[];
@@ -48,4 +51,39 @@ export const getBatchStatus = async (req: Request, res: Response) => {
     status: state,
     result: job.returnvalue || null,
   });
+}
+
+export const downloadBatch = async (req: Request, res: Response) => {
+  const batchId = req.params.id;
+
+  if (typeof batchId !== 'string') {
+    throw new ApiError('Batch ID is required', 400);
+  }
+
+  const batchDir = path.join(process.cwd(), 'outputs', batchId)
+
+  res.attachment(`batch_${batchId}.zip`);
+
+  const archive = new ZipArchive({ zlib: {level: 9}})
+
+  archive.pipe(res);
+
+  archive.directory(batchDir, false); 
+  await archive.finalize();
+}
+
+export const downloadFile = async (req: Request, res: Response) => {
+  const { id: batchId, filename } = req.params;
+
+  if (typeof batchId !== 'string' || typeof filename !== 'string') {
+    throw new ApiError('Invalid parameters', 400);
+  }
+
+  const filePath = path.join(process.cwd(), 'outputs', batchId, filename);
+
+  if (!existsSync(filePath)) {
+    throw new ApiError('File not found', 404);
+  }
+
+  return res.download(filePath, filename); 
 }
