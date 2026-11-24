@@ -22,15 +22,19 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
-  minio:
-    image: minio/minio:latest
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    container_name: seaweedfs
     restart: unless-stopped
     ports:
-      - "9000:9000"
-      - "9001:9001"
-    command: server /data --console-address ":9001"
+      - "8333:8333" # S3 API endpoint
+      - "9333:9333" # Web Admin UI
+    command: "server -dir=/data -s3"
+    environment:
+      - AWS_ACCESS_KEY_ID=${S3_ACCESS_KEY:-admin}
+      - AWS_SECRET_ACCESS_KEY=${S3_SECRET_KEY:-secret}
     volumes:
-      - minio-data:/data
+      - seaweedfs-data:/data
 
 
 volumes:
@@ -38,5 +42,5 @@ volumes:
     driver: local
   postgres-data:
     driver: local
-  minio-data:
+  seaweedfs-data:
     driver: local

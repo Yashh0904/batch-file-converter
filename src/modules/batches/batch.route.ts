@@ -3,7 +3,7 @@ import { createBatch, downloadBatch, downloadFile, getBatchStatus, streamBatchEv
 import multer from "multer";
 import { errorHandler } from "../../middleware/error.middleware.js";
 
-const upload = multer({ dest: './inputs' })
+const upload = multer({ storage: multer.memoryStorage() })
 
 const batchRouter = express.Router();
 

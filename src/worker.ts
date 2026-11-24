@@ -3,8 +3,9 @@ import type { ImageJobData } from "./utils/queue.js";
 import redis from "./lib/redis.js";
 import sharp, { type FormatEnum } from "sharp";
 import path from "node:path";
-import fs from "node:fs";
 import { Asset, Batch } from "./prisma/db.js";
+import { s3, s3Bucket } from "./lib/s3.js";
+import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 
 const batchWorker = new Worker('batch-summary', async (job) => {
   console.log(`\nAll children finished! Finalizing batch: ${job.data.batchId}`);
@@ -33,26 +34,40 @@ const batchWorker = new Worker('batch-summary', async (job) => {
 })
 
 const imageWorker = new Worker('image-processing', async (job: Job<ImageJobData>) => {
-  const {batchId, inputPath, outputFormat} = job.data;
+  const {batchId, inputKey, outputFormat} = job.data;
 
-  console.log(`Processing file: ${inputPath} to format: ${outputFormat}`);
+  console.log(`Processing file: ${inputKey} to format: ${outputFormat}`);
 
-  const batchDir = path.resolve('outputs', batchId);
-  fs.mkdirSync(batchDir, { recursive: true });
+  const s3Response = await s3.send(
+    new GetObjectCommand({
+      Bucket: s3Bucket,
+      Key: inputKey
+    })
+  );
 
-  const baseName = path.parse(inputPath).name;
-  const relativePath = path.join('outputs', batchId, `${baseName}.${outputFormat}`);
-  const destination = path.resolve(relativePath);
+  const inputBuffer = Buffer.from(await s3Response.Body!.transformToByteArray());
 
-  const info = await sharp(inputPath)
-    .toFormat(outputFormat as keyof FormatEnum, {quality: 80})
-    .toFile(destination)
+  const outputBuffer = await sharp(inputBuffer)
+    .toFormat(outputFormat as keyof FormatEnum, { quality: 80 })
+    .toBuffer();
+
+  const baseName = path.parse(inputKey).name;
+  const outputKey = `outputs/${batchId}/${baseName}.${outputFormat}`;
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: s3Bucket,
+      Key: outputKey,
+      Body: outputBuffer,
+      ContentType: `image/${outputFormat}`,
+    })
+  );
 
   await Asset.create({
     batchId,
-    originalPath: inputPath,
-    outputPath: destination,
-    fileSize: info.size,
+    originalPath: inputKey,
+    outputPath: outputKey,
+    fileSize: outputBuffer.length,
     format: outputFormat
   });
 
@@ -64,7 +79,7 @@ const imageWorker = new Worker('image-processing', async (job: Job<ImageJobData>
     })
   );
 
-  return { destination, size: info.size }
+  return { outputKey, size: outputBuffer.length }
 }, {
   connection: redis,
   concurrency: 4

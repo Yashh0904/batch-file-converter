@@ -3,10 +3,11 @@ import { ApiError } from "../../middleware/error.middleware.js";
 import { createBatchJob } from "./batch.service.js";
 import { batchQueue } from "../../utils/queue.js";
 import path from "node:path";
-import { existsSync } from "node:fs";
 import { ZipArchive } from "archiver";
-import { Batch } from "../../prisma/db.js";
+import { Asset, Batch } from "../../prisma/db.js";
 import redis from "../../lib/redis.js";
+import { s3, s3Bucket } from "../../lib/s3.js";
+import { GetObjectCommand } from "@aws-sdk/client-s3";
 
 export const createBatch = async (req: Request, res: Response) => {
   const files = req.files as Express.Multer.File[];
@@ -79,10 +80,25 @@ export const downloadBatch = async (req: Request, res: Response) => {
 
   archive.pipe(res);
 
-  for(const asset of batch.assets) {
-    if(existsSync(asset.outputPath)) {
-      archive.file(asset.outputPath, { name: path.basename(asset.outputPath) });
-    }
+  const files = await Promise.all(
+    batch.assets.map(async (asset) => {
+      const s3Response = await s3.send(
+        new GetObjectCommand({
+        Bucket: s3Bucket,
+        Key: asset.outputPath
+      }));
+
+      const buffer = Buffer.from(await s3Response.Body!.transformToByteArray());
+
+      return {
+        name: path.basename(asset.outputPath),
+        buffer
+      };
+    })
+  );
+
+  for(const file of files) {
+    archive.append(file.buffer, { name: file.name });
   }
   
   await archive.finalize();
@@ -95,13 +111,24 @@ export const downloadFile = async (req: Request, res: Response) => {
     throw new ApiError('Invalid parameters', 400);
   }
 
-  const filePath = path.join(process.cwd(), 'outputs', batchId, filename);
+  const file = await Asset.where({ 
+    batchId: batchId,
+    outputPath: `outputs/${batchId}/${filename}`
+  }).first();
 
-  if (!existsSync(filePath)) {
-    throw new ApiError('File not found', 404);
+  if(!file) {
+    throw new ApiError(`No such file`, 404);
   }
 
-  return res.download(filePath, filename); 
+  const s3Response = await s3.send(
+    new GetObjectCommand({
+      Bucket: s3Bucket,
+      Key: file.outputPath
+    })
+  );
+
+  res.attachment(filename);
+  (s3Response.Body as NodeJS.ReadableStream).pipe(res);
 }
 
 export const streamBatchEvents = async (req: Request, res: Response) => {

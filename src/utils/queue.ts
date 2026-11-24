@@ -3,7 +3,7 @@ import redis from "../lib/redis.js";
 
 export interface ImageJobData {
   batchId: string,
-  inputPath: string,
+  inputKey: string,
   outputFormat: string,
   width?: number,
   height?: number
