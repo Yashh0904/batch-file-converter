@@ -16,6 +16,13 @@ const batchWorker = new Worker('batch-summary', async (job) => {
   const childrenValues = await job.getChildrenValues();
   console.log('Results from all images:', childrenValues);
 
+  await redis.publish(`batch:${job.data.batchId}:events`,
+    JSON.stringify({
+      type: 'completed',
+      batchId: job.data.batchId,
+    })
+  );
+
   return {
     batchId: job.data.batchId,
     totalFiles: Object.keys(childrenValues).length,
@@ -48,6 +55,14 @@ const imageWorker = new Worker('image-processing', async (job: Job<ImageJobData>
     fileSize: info.size,
     format: outputFormat
   });
+
+  await redis.publish(`batch:${batchId}:events`,
+    JSON.stringify({
+      type: "progress",
+      file: baseName,
+      format: outputFormat
+    })
+  );
 
   return { destination, size: info.size }
 }, {

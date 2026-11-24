@@ -6,6 +6,7 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { ZipArchive } from "archiver";
 import { Batch } from "../../prisma/db.js";
+import redis from "../../lib/redis.js";
 
 export const createBatch = async (req: Request, res: Response) => {
   const files = req.files as Express.Multer.File[];
@@ -101,4 +102,49 @@ export const downloadFile = async (req: Request, res: Response) => {
   }
 
   return res.download(filePath, filename); 
+}
+
+export const streamBatchEvents = async (req: Request, res: Response) => {
+  const batchId = req.params.id;
+
+  if (typeof batchId !== 'string') {
+    throw new ApiError('Batch ID is required', 400);
+  }
+
+  const batch = await Batch.where({ id: batchId }).first();
+  if (!batch) {
+    throw new ApiError('Batch not found', 404);
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  if(batch.status === 'COMPLETED') {
+    res.write(`data: ${JSON.stringify({ type: 'completed', batchId })}\n\n`);
+    res.end();
+    return;
+  }
+
+  const subscriber = redis.duplicate();
+  await subscriber.subscribe(`batch:${batchId}:events`);
+
+  res.write(`data: ${JSON.stringify({ type: 'connected', batchId, totalFiles: batch.totalFiles })}\n\n`);
+
+  subscriber.on('message', (channel, message) => {
+    res.write(`data: ${message}\n\n`);
+
+    const event = JSON.parse(message);
+    if(event.type === 'completed') {
+      subscriber.unsubscribe();
+      subscriber.quit();
+      res.end();
+    }
+  });
+
+  req.on('close', () => {
+    subscriber.unsubscribe();
+    subscriber.quit();
+  });
 }
