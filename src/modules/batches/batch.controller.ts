@@ -8,6 +8,7 @@ import { Asset, Batch } from "../../prisma/db.js";
 import redis from "../../lib/redis.js";
 import { s3, s3Bucket } from "../../lib/s3.js";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
+import sharp from "sharp";
 
 export const createBatch = async (req: Request, res: Response) => {
   const files = req.files as Express.Multer.File[];
@@ -174,4 +175,28 @@ export const streamBatchEvents = async (req: Request, res: Response) => {
     subscriber.unsubscribe();
     subscriber.quit();
   });
+}
+
+export const resizeImage = async (req: Request, res: Response) => {
+  const file = req.file;
+  if (!file) {
+    throw new ApiError("No file uploaded", 400);
+  }
+
+  const width = req.body.width ? Number(req.body.width) : undefined;
+  const height = req.body.height ? Number(req.body.height) : undefined;
+  if (!width && !height) {
+    throw new ApiError("Provide at least width or height", 400);
+  }
+
+  const resizedBuffer = await sharp(file.buffer)
+    .resize(width, height, {
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .toBuffer();
+
+  res.setHeader("Content-Type", file.mimetype);
+  res.setHeader("Content-Disposition", `inline; filename="resized_${file.originalname}"`);
+  return res.send(resizedBuffer);
 }

@@ -1,4 +1,24 @@
 services:
+  app:
+    build: .
+    container_name: batch-uploader-api
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      PORT: 5000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      S3_ENDPOINT: http://seaweedfs:8333
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-admin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-secret}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-batch-media}
+      S3_REGION: ${S3_REGION:-us-east-1}
+    depends_on:
+      - redis
+      - postgres
+      - seaweedfs
   redis:
     image: redis:alpine
     container_name: redis
